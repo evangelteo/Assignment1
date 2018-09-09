@@ -122,16 +122,16 @@ retail_data_DescandCID$Date <- as.Date(retail_data_DescandCID$Date) #for M
 retail_data_wo_cancelled$Date <- as.Date(retail_data_wo_cancelled$Date) #for R & F 
 
 #(start)dec 2010 - march 2011(end)
-rfm_data_1_M <- retail_data_DescandCID %>% filter(Date <= as.Date("2011-03-31"))
-rfm_data_1_RF <- retail_data_wo_cancelled %>% filter(Date <= as.Date("2011-03-31"))
+rfm_data_1_m <- retail_data_DescandCID %>% filter(Date <= as.Date("2011-03-31"))
+rfm_data_1_rf <- retail_data_wo_cancelled %>% filter(Date <= as.Date("2011-03-31"))
 
 #(start)april 2011 - july 2011(end)
-rfm_data_2_M <- retail_data_DescandCID %>% filter(Date >= as.Date("2011-04-01")) %>% filter(Date < as.Date("2011-07-01")) 
-rfm_data_2_RF <- retail_data_wo_cancelled %>% filter(Date >= as.Date("2011-04-01")) %>% filter(Date < as.Date("2011-07-01")) 
+rfm_data_2_m <- retail_data_DescandCID %>% filter(Date >= as.Date("2011-04-01")) %>% filter(Date < as.Date("2011-07-01")) 
+rfm_data_2_rf <- retail_data_wo_cancelled %>% filter(Date >= as.Date("2011-04-01")) %>% filter(Date < as.Date("2011-07-01")) 
 
 #(start)aug 2011 - dec 2011(end)
-rfm_data_3_M <- retail_data_DescandCID %>% filter(Date >= as.Date("2011-07-01"))
-rfm_data_3_RF <- retail_data_wo_cancelled %>% filter(Date >= as.Date("2011-07-01"))
+rfm_data_3_m <- retail_data_DescandCID %>% filter(Date >= as.Date("2011-07-01"))
+rfm_data_3_rf <- retail_data_wo_cancelled %>% filter(Date >= as.Date("2011-07-01"))
 
 #####################################
 #                                   #
@@ -139,57 +139,189 @@ rfm_data_3_RF <- retail_data_wo_cancelled %>% filter(Date >= as.Date("2011-07-01
 #                                   #
 #####################################
 
+#FIRST PERIOD: Dec 2010 - March 2011
 
-library(dplyr)
-library(gtools)
+# The following code sorts the transactions by date.
+rfm_data_1_rf <- rfm_data_1_rf[order(rfm_data_1_rf$Date),]
+rfm_data_1_m <- rfm_data_1_m[order(rfm_data_1_m$Date),]
 
-#total spent for each invoice
+head(rfm_data_1_rf) 
 
-t <- group_by(new_retail_data, InvoiceNo, Date, CustomerID ) %>% summarise(TotalSum = sum(TotalSpent))
-t<- t[order(t$CustomerID),]
+################################################################################
+# Now, for each customer, we find the days between each subsequent purchase,
+# the total number of visits made, and amount spent.
+total_visits_1 <- NULL
+total_amount_1 <- NULL
+since_prev_1 <- NULL
 
-#getting the rfm
-#getting the m first by finding the total amount spent by that customer
-tempm <- group_by(t, CustomerID) %>% summarise(Customertotal = sum(TotalSum))
+for (id in unique(rfm_data_1_rf$CustomerID)) {
+  total_visits_1 <- c(total_visits_1, sum(rfm_data_1_rf$CustomerID == id))
+  since_prev_1 <- c(since_prev_1, min(as.numeric(as.Date("2018/09/07")
+                                             - rfm_data_1_rf$Date[rfm_data_1_rf$CustomerID == id])))
+  total_amount_1 <- c(total_amount_1, sum(rfm_data_1_m$TotalSpent[rfm_data_1_m$CustomerID == id]))
+}
 
-library(plyr)
-m <- quantcut(tempm$Customertotal, 5)
-levelm <- levels(m)
-m <- mapvalues(m,  from = levelm, to = c(1,2,3,4,5))
+#This means that those that only have cancelled orders will be left out in RFM calculation.
 
-#getting the f
-t$CustomerID <- as.factor(t$CustomerID)
-detach("package:plyr", unload=TRUE) 
-library(dplyr)
-temp <- group_by(t, CustomerID) %>% summarise(count = n())
 
-library(plyr)
-f <- quantcut(temp$count, 5)
-levelf <- levels(f)
-f<- mapvalues(f,  from = levelf, to = c(1,2,3,4,5))
+customer_data_1 <- data.frame(id=unique(rfm_data_1_rf$CustomerID),
+                            total_visits=total_visits_1,
+                            total_amount=total_amount_1,
+                            since_prev=since_prev_1)
+head(customer_data_1)
+################################################################################
+customers_1 <- data.frame(cid = unique(customer_data_1$id))
+# The following commands assign the recency, frequency, and monetary value
+# rating on a scale of 1-5 with 5 being the most recent, most frequent, most
+# monetary value, and 1 being the least recent, least frequent and least
+# monetary value.
 
-detach("package:plyr", unload=TRUE) 
-library(dplyr)
+# New R, F, M-score assigning function.
+map_quantiles <- function(vect, num_groups=5) {
+  ranks <- order(vect)
+  result <- numeric(length(vect))
+  one_unit <- floor(length(vect) / num_groups)
+  for (index in 1:num_groups) {
+    if (index == num_groups) {
+      result[(index - 1) * one_unit < ranks] <- index
+    } else {
+      result[(index - 1) * one_unit < ranks & ranks <= index * one_unit] <- index
+    }
+  }
+  result
+}
 
-#getting the r
+customers_1$recency <- 6 - map_quantiles(customer_data_1$since_prev)
 
-rf <-data.frame(CID = unique(t$CustomerID), Recency = numeric(length(rf$CID)))
+customers_1$frequency <- map_quantiles(customer_data_1$total_visits)
 
-nowvalue <- as.numeric(as.Date("2018-09-01"))
+customers_1$amount <- map_quantiles(customer_data_1$total_amount)
 
-Datevalue = nowvalue - as.numeric(as.Date(as.character(t$Date), "%Y-%m-%d")) 
+# The RFM score is then a concatenation of the above three scores. Here is its
+# calculation:
+customers_1$rfm <- (customers_1$recency*100
+                  + customers_1$frequency*10
+                  + customers_1$amount)
+head(customers_1)
 
-library(tidyverse)
-tempr <- add_column(t, Datevalue)
 
-tempr <- group_by(tempr, CustomerID) %>% summarise(r = min(Datevalue))
-library(plyr)
-r <- quantcut(tempr$r, 5)
-levelr<- levels(r)
-r<- mapvalues(r,  from = levelr, to = c(5,4,3,2,1))
-detach("package:plyr", unload=TRUE) 
 
-#Getting the RFM values
-rfm <- data.frame(CID = tempr$CustomerID, r = r, f = f, m =m, stringsAsFactors=FALSE)
-rfm <- add_column(rfm,RFM = paste(rfm$r, rfm$f,rfm$m, sep = ""))
 
+################################################################################################
+# SECOND PERIOD: April 2011 - July 2011
+
+
+# The following code sorts the transactions by date.
+rfm_data_2_rf <- rfm_data_2_rf[order(rfm_data_2_rf$Date),]
+rfm_data_2_m <- rfm_data_2_m[order(rfm_data_2_m$Date),]
+
+head(rfm_data_2_rf) 
+
+################################################################################
+# Now, for each customer, we find the days between each subsequent purchase,
+# the total number of visits made, and amount spent.
+total_visits_2 <- NULL
+total_amount_2 <- NULL
+since_prev_2 <- NULL
+
+for (id in unique(rfm_data_2_rf$CustomerID)) {
+  total_visits_2 <- c(total_visits_2, sum(rfm_data_2_rf$CustomerID == id))
+  since_prev_2 <- c(since_prev_2, min(as.numeric(as.Date("2018/09/07")
+                                               - rfm_data_2_rf$Date[rfm_data_2_rf$CustomerID == id])))
+  total_amount_2 <- c(total_amount_2, sum(rfm_data_2_m$TotalSpent[rfm_data_2_m$CustomerID == id]))
+}
+
+#This means that those that only have cancelled orders will be left out in RFM calculation.
+
+
+customer_data_2 <- data.frame(id=unique(rfm_data_2_rf$CustomerID),
+                              total_visits=total_visits_2,
+                              total_amount=total_amount_2,
+                              since_prev=since_prev_2)
+head(customer_data_2)
+################################################################################
+customers_2 <- data.frame(cid = unique(customer_data_2$id))
+
+customers_2$recency <- 6 - map_quantiles(customer_data_2$since_prev)
+
+customers_2$frequency <- map_quantiles(customer_data_2$total_visits)
+
+customers_2$amount <- map_quantiles(customer_data_2$total_amount)
+
+# The RFM score is then a concatenation of the above three scores. Here is its
+# calculation:
+customers_2$rfm <- (customers_2$recency*100
+                    + customers_2$frequency*10
+                    + customers_2$amount)
+head(customers_2)
+
+
+
+##############################################################################################
+# THIRD PERIOD: Aug 2011 - Dec 2011
+
+
+# The following code sorts the transactions by date.
+rfm_data_3_rf <- rfm_data_3_rf[order(rfm_data_3_rf$Date),]
+rfm_data_3_m <- rfm_data_3_m[order(rfm_data_3_m$Date),]
+
+head(rfm_data_3_rf) 
+
+################################################################################
+# Now, for each customer, we find the days between each subsequent purchase,
+# the total number of visits made, and amount spent.
+total_visits_3 <- NULL
+total_amount_3 <- NULL
+since_prev_3 <- NULL
+
+for (id in unique(rfm_data_3_rf$CustomerID)) {
+  total_visits_3 <- c(total_visits_3, sum(rfm_data_3_rf$CustomerID == id))
+  since_prev_3 <- c(since_prev_3, min(as.numeric(as.Date("2018/09/07")
+                                                 - rfm_data_3_rf$Date[rfm_data_3_rf$CustomerID == id])))
+  total_amount_3 <- c(total_amount_3, sum(rfm_data_3_m$TotalSpent[rfm_data_3_m$CustomerID == id]))
+}
+
+#This means that those that only have cancelled orders will be left out in RFM calculation.
+
+
+customer_data_3 <- data.frame(id=unique(rfm_data_3_rf$CustomerID),
+                              total_visits=total_visits_3,
+                              total_amount=total_amount_3,
+                              since_prev=since_prev_3)
+head(customer_data_3)
+################################################################################
+customers_3 <- data.frame(cid = unique(customer_data_3$id))
+
+customers_3$recency <- 6 - map_quantiles(customer_data_3$since_prev)
+
+customers_3$frequency <- map_quantiles(customer_data_3$total_visits)
+
+customers_3$amount <- map_quantiles(customer_data_3$total_amount)
+
+# The RFM score is then a concatenation of the above three scores. Here is its
+# calculation:
+customers_3$rfm <- (customers_3$recency*100
+                    + customers_3$frequency*10
+                    + customers_3$amount)
+head(customers_3)
+
+
+###############################################################################################
+#Combining the rfm from each period
+
+rfm_1 <- NULL
+rfm_2 <- NULL
+rfm_3 <- NULL
+cid <- NULL
+
+for (id in intersect(intersect(customers_1$cid,customers_2$cid),customers_3$cid)) {
+  cid <- c(cid, id)
+  rfm_1 <- c(rfm_1, (customers_1$rfm[customers_1$cid == id]))
+  rfm_2 <- c(rfm_2, (customers_2$rfm[customers_2$cid == id]))
+  rfm_3 <- c(rfm_3, (customers_3$rfm[customers_3$cid == id]))
+}
+
+combined_rfm <-data.frame(cid,
+                          rfm_1=rfm_1,
+                          rfm_2=rfm_2,
+                          rfm_3=rfm_3)
