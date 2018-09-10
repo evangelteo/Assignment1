@@ -100,3 +100,35 @@ customers$amount <- map_quantiles(customer_retail_data$total_amount)
 #The RFM score is then a concatenation of the above three scores. Here is its calculation:
 customers$rfm <- (customers$recency*100 + customers$frequency*10 + customers$amount)
 head(customers)
+
+
+#################################################################################################################################
+retail_wo_CID <- rbind(retail_filled, retail_data_w_description_wo_CID)
+retail_wo_CID$Date <- as.Date(retail_wo_CID$Date)
+combined_data <- rbind(retail_wo_CID,retail_data_DescandCID)
+combined_data <- combined_data %>% filter(!str_detect(InvoiceNo,"C"))
+
+########## Visualisation of top 5 countries by number of orders
+countries <- combined_data %>% group_by(Country) %>% summarise(count=n()) %>% arrange(desc(count)) 
+top_4 <- countries %>% top_n(n = 4, count)
+others <- countries[5:38,]
+s <- sum(others$count)
+levels(others$Country) <- c(levels(others$Country),"Others")
+others <- rbind(c("Others", s),others)[1,]
+countries <- rbind(top_4,others)
+
+
+ggplot(countries, aes(x=1, fill=reorder(Country,count),y=count)) + geom_bar(stat = "identity") +
+  xlab("") +
+  ylab("Count") + theme(axis.ticks = element_blank(),axis.text.x = element_blank()) +
+  labs(fill="Country") +  scale_fill_brewer(palette="Set1")
+
+
+######## Visualisation of Distribution of Number of Orders by Month
+
+library(lubridate)
+by_months <- combined_data %>% mutate(month=month(Date))  
+by_months <- by_months %>% group_by(month) %>% summarise(count=n())
+by_months$month <- c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+by_months$month = factor(by_months$month, levels = month.abb)
+ggplot(by_months) + geom_bar(aes(x=month,y=count), stat="identity")
